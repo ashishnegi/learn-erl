@@ -1,3 +1,5 @@
+-module(lists).
+
 [2*N || N <- [1,2,3,4]].
 
 Weather = [{toronto, rain}, {montreal, storms}, {london, fog},
