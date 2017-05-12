@@ -13,13 +13,12 @@ oracle() ->
     oracle().
 
 oracle_reincarnate() ->
-    process_flag(trap_exit, true),
-    Pid = spawn_link(?MODULE, oracle, []),
+    {Pid, Ref} = spawn_monitor(?MODULE, oracle, []),
     register(oracle, Pid),
     receive
-	{'EXIT', Pid, normal} ->
+	{'DOWN', Ref, process, Pid, normal} ->
 	    ok;
-	{'EXIT', Pid, shudown} ->
+	{'DOWN', Ref, process, Pid, shutdown} ->
 	    ok;
 	_ ->
 	    oracle_reincarnate()
