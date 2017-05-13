@@ -14,6 +14,7 @@ todo(Todo) ->
     end.
 
 mk_todo(EmPid, Todo) ->
+    %% io:format("mk_todo: self() : ~p~n", [self()]),
     spawn_monitor(?MODULE, todo, [Todo]),
     receive
 	{'DOWN', _, process, _, timer_fired} ->
@@ -22,18 +23,20 @@ mk_todo(EmPid, Todo) ->
 	    EmPid ! { unknown, Err }
     end.
 
-
-event_manager(Clients) ->
+event_manager(Clients, PidTodoDict) ->
     receive
 	{add, Todo} ->
-	    spawn(?MODULE, mk_todo, [self(), Todo]);
+	    TodoPid = spawn(?MODULE, mk_todo, [self(), Todo]),
+	    event_manager(Clients, dict:store(TodoPid, Todo, PidTodoDict));
 	{add_client, Pid} ->
-	    event_manager([Pid | Clients]);
+	    event_manager([Pid | Clients], PidTodoDict);
+	{remove_client, Pid} ->
+	    NewClients = [Client || Client <- Clients, Client /= Pid],
+	    event_manager(NewClients, PidTodoDict);
 	{timer_fired, Todo} ->
 	    [ClientPid ! {todo_time, Todo} || ClientPid <- Clients],
-	    event_manager(Clients)
-    end,
-    event_manager(Clients).
+	    event_manager(Clients, PidTodoDict)
+    end.
 
 new_todo(Name, Desc, Timer) ->
     #todo{name = Name,
@@ -45,11 +48,31 @@ new_client(C_ID) ->
     receive
 	{todo_time, Todo} ->
 	    io:format("client ~p received : ~p~n", [C_ID, Todo])
-    end.
+    end,
+    new_client(C_ID).
 
-%% f().
-%% PidC1 = spawn(todolist, new_client, [1]).
-%% PidC2 = spawn(todolist, new_client, [2]).
-%% PidEm = spawn(todolist, event_manager, [[PidC1, PidC2]]).
-%% T1 = todolist:new_todo("Ashish", "first todo", 2000).
-%% PidEm ! {add, T1}.
+test_add() ->
+    io:format("client 1 and 2 should get message~n"),
+    PidC1 = spawn(todolist, new_client, [1]),
+    PidC2 = spawn(todolist, new_client, [2]),
+    PidEm = spawn(todolist, event_manager, [[PidC1, PidC2], dict:new()]),
+    T1 = todolist:new_todo("Ashish", "first todo", 500),
+    PidEm ! {add, T1}.
+
+test_remove() ->
+    io:format("client 1 only should get message~n"),
+    PidC1 = spawn(todolist, new_client, [1]),
+    PidC2 = spawn(todolist, new_client, [2]),
+    PidEm = spawn(todolist, event_manager, [[PidC1, PidC2], dict:new()]),
+    T1 = todolist:new_todo("Ashish", "first todo", 500),
+    PidEm ! {add, T1},
+    PidEm ! {remove_client, PidC2}.
+
+test_multiple_todos() ->
+    io:format("client 1 should get 2 message~n"),
+    PidC1 = spawn(todolist, new_client, [1]),
+    PidEm = spawn(todolist, event_manager, [[PidC1], dict:new()]),
+    T1 = todolist:new_todo("Ashish", "first todo", 500),
+    T2 = todolist:new_todo("Ashish", "second todo", 600),
+    PidEm ! {add, T1},
+    PidEm ! {add, T2}.
