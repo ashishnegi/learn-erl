@@ -11,6 +11,7 @@ todo(Todo) ->
     receive
 	_ -> todo(Todo)
     after Todo#todo.timer ->
+	    %% io:format("todo: ~p timer..~n", [Todo]),
 	    exit(timer_fired)
     end.
 
@@ -53,7 +54,10 @@ event_manager(Clients, TodoIdPidDict) ->
 
 	{timer_fired, Todo} ->
 	    [ClientPid ! {todo_time, Todo} || ClientPid <- Clients],
-	    event_manager(Clients, dict:erase(Todo#todo.todo_key, TodoIdPidDict))
+	    event_manager(Clients, dict:erase(Todo#todo.todo_key, TodoIdPidDict));
+	OtherMsg ->
+	    io:format("ev_mg : Other msg : ~p", OtherMsg),
+	    event_manager(Clients, TodoIdPidDict)
     end.
 
 new_todo(Key, Name, Desc, Timer) ->
@@ -70,13 +74,18 @@ new_client(C_ID) ->
     end,
     new_client(C_ID).
 
+teardown(Processes) ->
+    timer:sleep(1000),
+    [exit(Process, shutdown) || Process <- Processes].
+
 test_add() ->
     io:format("test_add # client 1 and 2 should get message~n"),
     PidC1 = spawn(todolist, new_client, [1]),
     PidC2 = spawn(todolist, new_client, [2]),
     PidEm = spawn(todolist, event_manager, [[PidC1, PidC2], dict:new()]),
     T1 = todolist:new_todo(1, "Ashish", "first todo", 500),
-    PidEm ! {add_todo, T1}.
+    PidEm ! {add_todo, T1},
+    teardown([PidEm, PidC1, PidC2]).
 
 test_multiple_todos() ->
     io:format("test_multiple_todos # client 1 should get 2 message~n"),
@@ -85,7 +94,8 @@ test_multiple_todos() ->
     T1 = todolist:new_todo(1, "Ashish", "first todo", 500),
     T2 = todolist:new_todo(2, "Ashish", "second todo", 600),
     PidEm ! {add_todo, T1},
-    PidEm ! {add_todo, T2}.
+    PidEm ! {add_todo, T2},
+    teardown([PidC1, PidEm]).
 
 test_delete_todo() ->
     io:format("test_delete_todo # No client should get messages~n"),
@@ -96,7 +106,8 @@ test_delete_todo() ->
     PidEm ! {add_todo, T1},
     PidEm ! {add_todo, T2},
     PidEm ! {delete_todo, T2},
-    PidEm ! {delete_todo, T1}.
+    PidEm ! {delete_todo, T1},
+    teardown([PidC1, PidEm]).
 
 test_remove_client() ->
     io:format("test_remove_client # client 1 only should get message~n"),
@@ -105,15 +116,14 @@ test_remove_client() ->
     PidEm = spawn(todolist, event_manager, [[PidC1, PidC2], dict:new()]),
     T1 = todolist:new_todo(1, "Ashish", "first todo", 500),
     PidEm ! {add_todo, T1},
-    PidEm ! {remove_client, PidC2}.
+    PidEm ! {remove_client, PidC2},
+    teardown([PidC1, PidEm, PidC2]).
 
 all_test() ->
-    %% sleep only to make sense of output..
-    %% tests donot have any asserts but only i check for print statements.. :(
+    BeforeTestProcessCount = length(erlang:processes()),
     test_add(),
-    timer:sleep(1000),
     test_delete_todo(),
-    timer:sleep(1000),
     test_multiple_todos(),
+    test_remove_client(),
     timer:sleep(1000),
-    test_remove_client().
+    BeforeTestProcessCount == length(erlang:processes()).
