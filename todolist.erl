@@ -4,39 +4,29 @@
 -record(todo, {name,
 	       description,
 	       timer,
-	       todo_key %% currently pid
+	       key %% currently pid
 	      }).
 
-todo(Todo) ->
+mk_todo(EmPid, Todo) ->
     receive
-	_ -> todo(Todo)
+	cancel ->
+	    EmPid ! {done, cancel};
+	_ ->
+	    mk_todo(EmPid, Todo)
     after Todo#todo.timer ->
 	    %% io:format("todo: ~p timer..~n", [Todo]),
-	    exit(timer_fired)
-    end.
-
-mk_todo(EmPid, TodoArg) ->
-    %% io:format("mk_todo: self() : ~p~n", [self()]),
-    Todo = TodoArg#todo {
-	     todo_key = self()
-	    },
-    spawn_monitor(?MODULE, todo, [Todo]),
-    receive
-	{'DOWN', _, process, _, timer_fired} ->
-	    EmPid ! { timer_fired, Todo };
-	Err ->
-	    EmPid ! { unknown, Err }
+	    EmPid ! {timer_fired, Todo}
     end.
 
 event_manager(Clients, TodoIdPidDict) ->
     %% io:format("ev_mg : clients ~p, todo->pid ~p~n", [Clients, TodoIdPidDict]),
     receive
 	{add_todo, Pid, Todo} ->
-	    case dict:find(Todo#todo.todo_key, TodoIdPidDict) of
+	    case dict:find(Todo#todo.key, TodoIdPidDict) of
 		error ->
 		    Pid ! {done, {add_todo, Pid, Todo}},
 		    TodoPid = spawn(?MODULE, mk_todo, [self(), Todo]),
-		    event_manager(Clients, dict:store(Todo#todo.todo_key,
+		    event_manager(Clients, dict:store(Todo#todo.key,
 						      TodoPid, TodoIdPidDict));
 		{ok, _} ->
 		    Pid ! {error, {add_todo, Pid, Todo}, "Already registered"},
@@ -44,12 +34,12 @@ event_manager(Clients, TodoIdPidDict) ->
 	    end;
 
 	{delete_todo, Pid, Todo} ->
-	    TodoId = Todo#todo.todo_key,
+	    TodoId = Todo#todo.key,
 	    case dict:find(TodoId, TodoIdPidDict) of
 		{ok, TodoPid} ->
 		    Pid ! {done, {delete_todo, Pid, Todo}},
 		    %% kill process
-		    exit(TodoPid, shutdown),
+		    TodoPid ! cancel,
 		    event_manager(Clients, dict:erase(TodoId, TodoIdPidDict));
 		_ ->
 		    Pid ! {error, {delete_todo, Pid, Todo}, "Unknown Todo"},
@@ -72,10 +62,16 @@ event_manager(Clients, TodoIdPidDict) ->
 	    event_manager(NewClients, TodoIdPidDict);
 
 	{timer_fired, Todo} ->
-	    [ClientPid ! {todo_time, Todo} || ClientPid <- Clients],
-	    event_manager(Clients, dict:erase(Todo#todo.todo_key, TodoIdPidDict));
+	    case dict:find(Todo#todo.key, TodoIdPidDict) of
+		{ok, _} ->
+		    [ClientPid ! {todo_time, Todo} || ClientPid <- Clients],
+		    event_manager(Clients, dict:erase(Todo#todo.key, TodoIdPidDict));
+		error ->
+		    io:format("timer_fired not found.. ~p~n", [Todo]),
+		    event_manager(Clients, TodoIdPidDict)
+	    end;
 	OtherMsg ->
-	    io:format("ev_mg : Other msg : ~p", [OtherMsg]),
+	    io:format("ev_mg : Other msg : ~p~n", [OtherMsg]),
 	    event_manager(Clients, TodoIdPidDict)
     end.
 
@@ -83,15 +79,16 @@ new_todo(Key, Name, Desc, Timer) ->
     #todo{name = Name,
 	  description = Desc,
 	  timer = Timer,
-	  todo_key = Key
+	  key = Key
 	 }.
 
 new_client(C_ID) ->
     receive
 	{todo_time, Todo} ->
 	    io:format("client ~p received : ~p~n", [C_ID, Todo]);
-	OtherMsg ->
-	    io:format("client ~p received : ~p~n", [C_ID, OtherMsg])
+	_ ->
+	    %% io:format("client ~p received : ~p~n", [C_ID, OtherMsg])
+	    {}
     end,
     new_client(C_ID).
 
