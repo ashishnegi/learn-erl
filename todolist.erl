@@ -31,18 +31,28 @@ mk_todo(EmPid, TodoArg) ->
 event_manager(Clients, TodoIdPidDict) ->
     %% io:format("ev_mg : clients ~p, todo->pid ~p~n", [Clients, TodoIdPidDict]),
     receive
-	{add_todo, Todo} ->
-	    TodoPid = spawn(?MODULE, mk_todo, [self(), Todo]),
-	    event_manager(Clients, dict:store(Todo#todo.todo_key,
-					      TodoPid, TodoIdPidDict));
-	{delete_todo, Todo} ->
+	{add_todo, Pid, Todo} ->
+	    case dict:find(Todo#todo.todo_key, TodoIdPidDict) of
+		error ->
+		    Pid ! {done, {add_todo, Pid, Todo}},
+		    TodoPid = spawn(?MODULE, mk_todo, [self(), Todo]),
+		    event_manager(Clients, dict:store(Todo#todo.todo_key,
+						      TodoPid, TodoIdPidDict));
+		{ok, _} ->
+		    Pid ! {error, {add_todo, Pid, Todo}, "Already registered"},
+		    event_manager(Clients, TodoIdPidDict)
+	    end;
+
+	{delete_todo, Pid, Todo} ->
 	    TodoId = Todo#todo.todo_key,
 	    case dict:find(TodoId, TodoIdPidDict) of
 		{ok, TodoPid} ->
+		    Pid ! {done, {delete_todo, Pid, Todo}},
 		    %% kill process
 		    exit(TodoPid, shutdown),
 		    event_manager(Clients, dict:erase(TodoId, TodoIdPidDict));
 		_ ->
+		    Pid ! {error, {delete_todo, Pid, Todo}, "Unknown Todo"},
 		    event_manager(Clients, TodoIdPidDict)
 	    end;
 
@@ -65,7 +75,7 @@ event_manager(Clients, TodoIdPidDict) ->
 	    [ClientPid ! {todo_time, Todo} || ClientPid <- Clients],
 	    event_manager(Clients, dict:erase(Todo#todo.todo_key, TodoIdPidDict));
 	OtherMsg ->
-	    io:format("ev_mg : Other msg : ~p", OtherMsg),
+	    io:format("ev_mg : Other msg : ~p", [OtherMsg]),
 	    event_manager(Clients, TodoIdPidDict)
     end.
 
@@ -79,7 +89,9 @@ new_todo(Key, Name, Desc, Timer) ->
 new_client(C_ID) ->
     receive
 	{todo_time, Todo} ->
-	    io:format("client ~p received : ~p~n", [C_ID, Todo])
+	    io:format("client ~p received : ~p~n", [C_ID, Todo]);
+	OtherMsg ->
+	    io:format("client ~p received : ~p~n", [C_ID, OtherMsg])
     end,
     new_client(C_ID).
 
@@ -93,7 +105,7 @@ test_add() ->
     PidC2 = spawn(todolist, new_client, [2]),
     PidEm = spawn(todolist, event_manager, [[PidC1, PidC2], dict:new()]),
     T1 = todolist:new_todo(1, "Ashish", "first todo", 500),
-    PidEm ! {add_todo, T1},
+    PidEm ! {add_todo, PidC1, T1},
     teardown([PidEm, PidC1, PidC2]).
 
 test_multiple_todos() ->
@@ -102,8 +114,8 @@ test_multiple_todos() ->
     PidEm = spawn(todolist, event_manager, [[PidC1], dict:new()]),
     T1 = todolist:new_todo(1, "Ashish", "first todo", 500),
     T2 = todolist:new_todo(2, "Ashish", "second todo", 600),
-    PidEm ! {add_todo, T1},
-    PidEm ! {add_todo, T2},
+    PidEm ! {add_todo, PidC1, T1},
+    PidEm ! {add_todo, PidC1, T2},
     teardown([PidC1, PidEm]).
 
 test_delete_todo() ->
@@ -112,10 +124,10 @@ test_delete_todo() ->
     PidEm = spawn(todolist, event_manager, [[PidC1], dict:new()]),
     T1 = todolist:new_todo(1, "Ashish", "first todo", 500),
     T2 = todolist:new_todo(2, "Ashish", "second todo", 600),
-    PidEm ! {add_todo, T1},
-    PidEm ! {add_todo, T2},
-    PidEm ! {delete_todo, T2},
-    PidEm ! {delete_todo, T1},
+    PidEm ! {add_todo, PidC1, T1},
+    PidEm ! {add_todo, PidC1, T2},
+    PidEm ! {delete_todo, PidC1, T2},
+    PidEm ! {delete_todo, PidC1, T1},
     teardown([PidC1, PidEm]).
 
 test_remove_client() ->
@@ -124,7 +136,7 @@ test_remove_client() ->
     PidC2 = spawn(todolist, new_client, [2]),
     PidEm = spawn(todolist, event_manager, [[PidC1, PidC2], dict:new()]),
     T1 = todolist:new_todo(1, "Ashish", "first todo", 500),
-    PidEm ! {add_todo, T1},
+    PidEm ! {add_todo, PidC1, T1},
     PidEm ! {remove_client, PidC2},
     teardown([PidC1, PidEm, PidC2]).
 
