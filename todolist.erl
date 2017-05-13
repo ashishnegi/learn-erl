@@ -47,9 +47,18 @@ event_manager(Clients, TodoIdPidDict) ->
 	    end;
 
 	{add_client, Pid} ->
+	    Pid ! { done, { add_client, Pid }},
 	    event_manager([Pid | Clients], TodoIdPidDict);
 	{remove_client, Pid} ->
-	    NewClients = [Client || Client <- Clients, Client /= Pid],
+	    NewClients =
+		case lists:member(Pid, Clients) of
+		    true ->
+			Pid ! {done, {remove_client, Pid}},
+			[Client || Client <- Clients, Client /= Pid];
+		    false ->
+			Pid ! {error, {remove_client, Pid}, "Unknown client"},
+			Clients
+		end,
 	    event_manager(NewClients, TodoIdPidDict);
 
 	{timer_fired, Todo} ->
