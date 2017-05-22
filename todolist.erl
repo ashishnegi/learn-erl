@@ -10,7 +10,7 @@
 mk_todo(EmPid, Todo) ->
     receive
 	cancel ->
-	    EmPid ! {done, cancel};
+	    EmPid ! {done, cancel, self()};
 	_ ->
 	    mk_todo(EmPid, Todo)
     after Todo#todo.timer ->
@@ -70,6 +70,12 @@ event_manager(Clients, TodoIdPidDict) ->
 		    io:format("timer_fired not found.. ~p~n", [Todo]),
 		    event_manager(Clients, TodoIdPidDict)
 	    end;
+	{done, cancel, _TodoPid} ->
+	    event_manager(Clients, TodoIdPidDict);
+
+	code_reload ->
+	    ?MODULE:event_manager(Clients,TodoIdPidDict);
+
 	OtherMsg ->
 	    io:format("ev_mg : Other msg : ~p~n", [OtherMsg]),
 	    event_manager(Clients, TodoIdPidDict)
