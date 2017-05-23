@@ -4,23 +4,27 @@
 
 -record(cat, {name, color=green, description}).
 
-%%% Client API
-start_link() -> spawn_link(fun init/0).
-
-
-%% Synchronous call
-order_cat(Pid, Name, Color, Description) ->
+%%% Generic API
+call(Pid, Msg) ->
     Ref = erlang:monitor(process, Pid),
-    Pid ! {self(), Ref, {order, Name, Color, Description}},
+    Pid ! {self(), Ref, Msg},
     receive
-	{Ref, Cat} ->
-	    erlang:demonitor(Ref, [flush]),
-	    Cat;
 	{'DOWN', Ref, process, Pid, Reason} ->
-	    erlang:error(Reason)
+	    erlang:error(Reason);
+	{Ref, Reply} ->
+	    erlang:demonitor(Ref, [flush]),
+	    Reply
     after 5000 ->
 	    erlang:error(timeout)
     end.
+
+
+%%% Client API
+start_link() -> spawn_link(fun init/0).
+
+%% Synchronous call
+order_cat(Pid, Name, Color, Description) ->
+    call(Pid, {order, Name, Color, Description}).
 
 %% This call is asynchronous
 return_cat(Pid, Cat = #cat{}) ->
@@ -29,17 +33,7 @@ return_cat(Pid, Cat = #cat{}) ->
 
 %% Synchronous call
 close_shop(Pid) ->
-    Ref = erlang:monitor(process, Pid),
-    Pid ! {self(), Ref, terminate},
-    receive
-	{Ref, ok} ->
-	    erlang:demonitor(Ref, [flush]),
-	    ok;
-	{'DOWN', Ref, process, Pid, Reason} ->
-	    erlang:error(Reason)
-    after 5000 ->
-	    erlang:error(timeout)
-    end.
+    call(Pid, terminate).
 
 %%% Server functions
 init() -> loop([]).
