@@ -7,7 +7,7 @@
 %%% Generic API
 call(Pid, Msg) ->
     Ref = erlang:monitor(process, Pid),
-    Pid ! {self(), Ref, Msg},
+    Pid ! {sync, self(), Ref, Msg},
     receive
 	{'DOWN', Ref, process, Pid, Reason} ->
 	    erlang:error(Reason);
@@ -28,7 +28,7 @@ order_cat(Pid, Name, Color, Description) ->
 
 %% This call is asynchronous
 return_cat(Pid, Cat = #cat{}) ->
-    Pid ! {return, Cat},
+    Pid ! {async, return, Cat},
     ok.
 
 %% Synchronous call
@@ -38,25 +38,27 @@ close_shop(Pid) ->
 %%% Server functions
 init() -> loop([]).
 
+handle_cast({return, Cat = #cat{}}, Cats) ->
+    [Cat|Cats].
+
+handle_call({order, Name, Color, Description}, Pid, Ref, Cats) ->
+    if Cats =:= [] ->
+	    Pid ! {Ref, make_cat(Name, Color, Description)},
+	    Cats;
+       Cats =/= [] -> % got to empty the stock
+	    Pid ! {Ref, hd(Cats)},
+	    tl(Cats)
+    end;
+handle_call(terminate, Pid, Ref, Cats) ->
+    Pid ! {Ref, ok},
+    terminate(Cats).
+
 loop(Cats) ->
     receive
-	{Pid, Ref, {order, Name, Color, Description}} ->
-	    if Cats =:= [] ->
-		    Pid ! {Ref, make_cat(Name, Color, Description)},
-		    loop(Cats);
-	       Cats =/= [] -> % got to empty the stock
-		    Pid ! {Ref, hd(Cats)},
-		    loop(tl(Cats))
-	    end;
-	{return, Cat = #cat{}} ->
-	    loop([Cat|Cats]);
-	{Pid, Ref, terminate} ->
-	    Pid ! {Ref, ok},
-	    terminate(Cats);
-	Unknown ->
-	    %% do some logging here too
-	    io:format("Unknown message: ~p~n", [Unknown]),
-	    loop(Cats)
+	{async, Message} ->
+	    loop(handle_cast(Message, Cats));
+	{sync, Pid, Ref, Message} ->
+	    loop(handle_call(Message, Pid, Ref, Cats))
     end.
 
 %%% Private functions
@@ -65,8 +67,7 @@ make_cat(Name, Col, Desc) ->
 
 terminate(Cats) ->
     [io:format("~p was set free.~n",[C#cat.name]) || C <- Cats],
-    ok.
-
+    exit(normal).
 
 test_boss()->
     Server = kitty:start_link(),
